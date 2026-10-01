@@ -37,3 +37,6 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+        env:
+          # Ubuntu runners have Docker; macOS runners don't.
+          CYAMUS_DOCKER_TESTS: ${{ matrix.os == 'ubuntu-latest' && '1' || '' }}
