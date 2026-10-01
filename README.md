@@ -100,6 +100,14 @@ Until the config directory exists, `setup` and `teardown` print a notice and exi
 | `cyamus compose-shared [args…]` | `docker compose` for the project's shared stack in `<config>/compose.yaml`. |
 | `cyamus edit [path]` | Opens the project config directory in `$EDITOR`. |
 
+## Agent skill
+
+[`SKILL.md`](SKILL.md) teaches coding agents working in a cyamus worktree how to use it. It covers using `cyamus compose` rather than `docker compose`, finding a service's URL, and what not to touch: the shared stack, teardown, and linked files. Install it with:
+
+```sh
+npx skills add https://github.com/ewilazarus/cyamus --skill cyamus --global
+```
+
 ## Manifest
 
 ```toml
