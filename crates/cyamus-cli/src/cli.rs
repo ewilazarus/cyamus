@@ -22,6 +22,20 @@ pub enum Command {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+    /// Run docker compose for this worktree's stack (shared services come from compose-shared).
+    #[command(disable_help_flag = true)]
+    Compose {
+        /// Arguments for `docker compose`, e.g. `up -d`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Run docker compose for the project's shared stack (<config>/compose.yaml).
+    #[command(name = "compose-shared", disable_help_flag = true)]
+    ComposeShared {
+        /// Arguments for `docker compose`, e.g. `up -d`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Open the project's config directory in $EDITOR.
     Edit {
         /// Any path inside a worktree of the project (default: current directory).

@@ -31,6 +31,8 @@ async fn harness(backend: SocketAddr) -> Harness {
     let wt = root.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     let registry = Registry::new(root.join("workspaces"), root.join("registry.lock"));
+    let shared_dir = root.join("projects/myproj");
+    std::fs::create_dir_all(&shared_dir).unwrap();
     registry
         .register(&Record {
             project: "myproj".into(),
@@ -45,25 +47,48 @@ async fn harness(backend: SocketAddr) -> Harness {
         socket: Ok(PathBuf::from("/nonexistent.sock")),
         source: "test".into(),
     };
-    let state = Arc::new(State::new(registry, endpoint, proxy.port()));
+    let state = Arc::new(State::new(
+        registry,
+        root.join("projects"),
+        endpoint,
+        proxy.port(),
+    ));
     state.set_docker(Snapshot {
         reachable: true,
         error: None,
-        containers: vec![Container {
-            id: "c1".into(),
-            name: "feat-x-web-1".into(),
-            labels: HashMap::from([
-                (COMPOSE_WORKING_DIR.into(), wt.display().to_string()),
-                (COMPOSE_SERVICE.into(), "web".into()),
-            ]),
-            ports: vec![PortBinding {
-                container_port: 3000,
-                host_ip: Some("0.0.0.0".into()),
-                host_port: Some(backend.port()),
-                tcp: true,
-            }],
-            created: 1,
-        }],
+        containers: vec![
+            Container {
+                id: "c1".into(),
+                name: "feat-x-web-1".into(),
+                labels: HashMap::from([
+                    (COMPOSE_WORKING_DIR.into(), wt.display().to_string()),
+                    (COMPOSE_SERVICE.into(), "web".into()),
+                ]),
+                ports: vec![PortBinding {
+                    container_port: 3000,
+                    host_ip: Some("0.0.0.0".into()),
+                    host_port: Some(backend.port()),
+                    tcp: true,
+                }],
+                created: 1,
+            },
+            // A shared-stack service of the same project (`cyamus compose-shared`).
+            Container {
+                id: "c2".into(),
+                name: "myproj-mailpit-1".into(),
+                labels: HashMap::from([
+                    (COMPOSE_WORKING_DIR.into(), shared_dir.display().to_string()),
+                    (COMPOSE_SERVICE.into(), "mailpit".into()),
+                ]),
+                ports: vec![PortBinding {
+                    container_port: 8025,
+                    host_ip: Some("0.0.0.0".into()),
+                    host_port: Some(backend.port()),
+                    tcp: true,
+                }],
+                created: 2,
+            },
+        ],
     });
     tokio::spawn(server::serve(listener, state));
     Harness { _tmp: tmp, proxy }
@@ -231,6 +256,14 @@ async fn relays_protocol_upgrades() {
 }
 
 #[tokio::test]
+async fn shared_stack_hostname_is_routed() {
+    let h = harness(echo_head_backend().await).await;
+    let resp = raw(h.proxy, &get("Mailpit.MyProj.localhost", "/", "")).await;
+    assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+    assert!(resp.contains("x-backend: yes"), "{resp}");
+}
+
+#[tokio::test]
 async fn unknown_host_lists_routes() {
     let h = harness(echo_head_backend().await).await;
     let typo = format!("wbe.feat-x.myproj.localhost:{}", h.proxy.port());
@@ -283,10 +316,17 @@ async fn status_api_and_route_page() {
     let status: Status = serde_json::from_str(json).unwrap();
     assert_eq!(status.port, h.proxy.port());
     assert_eq!(status.version, cyamus_daemon::VERSION);
-    assert_eq!(status.routes.len(), 1);
-    assert_eq!(status.routes[0].host, HOST);
+    assert_eq!(status.routes.len(), 2);
+    let route = status.routes.iter().find(|r| r.host == HOST).unwrap();
+    assert_eq!(route.workspace.as_deref(), Some("feat-x"));
+    assert!(
+        status
+            .routes
+            .iter()
+            .any(|r| r.host == "mailpit.myproj.localhost" && r.workspace.is_none())
+    );
     assert_eq!(
-        status.routes[0].target,
+        route.target,
         SocketAddr::from(([127, 0, 0, 1], backend.port()))
     );
 

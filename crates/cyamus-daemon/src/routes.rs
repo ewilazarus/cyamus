@@ -44,7 +44,8 @@ pub struct Route {
     pub host: String,
     pub target: SocketAddr,
     pub project: String,
-    pub workspace: String,
+    /// Branch label; `None` for the project's shared stack.
+    pub workspace: Option<String>,
     pub service: String,
     pub container: String,
 }
@@ -70,17 +71,31 @@ impl Table {
     }
 }
 
+/// A project's shared stack: its name and canonical config directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedStack {
+    pub project: String,
+    pub config_dir: PathBuf,
+}
+
+/// Who a container belongs to.
+struct Owner {
+    project: String,
+    workspace: Option<String>,
+}
+
 /// Builds the route table. `canonicalize` resolves a compose working
 /// directory to its canonical form (injected so tests need no filesystem).
 pub fn resolve(
     workspaces: &[Record],
+    shared: &[SharedStack],
     containers: &[Container],
     canonicalize: impl Fn(&Path) -> PathBuf,
 ) -> Table {
     let mut candidates: Vec<(&Container, Route)> = Vec::new();
     let mut unrouted = Vec::new();
     for container in containers {
-        match route_for(workspaces, container, &canonicalize) {
+        match route_for(workspaces, shared, container, &canonicalize) {
             Outcome::Ignore => {}
             Outcome::Unrouted(u) => unrouted.push(u),
             Outcome::Route(route) => candidates.push((container, route)),
@@ -95,7 +110,7 @@ pub fn resolve(
             unrouted.push(Unrouted {
                 container: route.container.clone(),
                 project: Some(route.project.clone()),
-                workspace: Some(route.workspace.clone()),
+                workspace: route.workspace.clone(),
                 reason: format!(
                     "duplicate of {} for {} (the older container wins)",
                     winner.container, route.host
@@ -118,28 +133,29 @@ enum Outcome {
 
 fn route_for(
     workspaces: &[Record],
+    shared: &[SharedStack],
     c: &Container,
     canonicalize: &impl Fn(&Path) -> PathBuf,
 ) -> Outcome {
     let has_cyamus_labels = c.labels.keys().any(|k| k.starts_with("cyamus."));
-    let unrouted = |ws: Option<&Record>, reason: String| {
+    let unrouted = |owner: Option<&Owner>, reason: String| {
         Outcome::Unrouted(Unrouted {
             container: c.name.clone(),
-            project: ws.map(|w| w.project.clone()),
-            workspace: ws.map(|w| w.label.clone()),
+            project: owner.map(|o| o.project.clone()),
+            workspace: owner.and_then(|o| o.workspace.clone()),
             reason,
         })
     };
 
-    let workspace = match membership(workspaces, c, canonicalize) {
-        Ok(Some(ws)) => ws,
+    let owner = match membership(workspaces, shared, c, canonicalize) {
+        Ok(Some(owner)) => owner,
         Ok(None) if has_cyamus_labels => {
             return unrouted(None, "does not belong to any registered workspace".into());
         }
         Ok(None) => return Outcome::Ignore,
         Err(reason) => return unrouted(None, reason),
     };
-    let ws = Some(workspace);
+    let ws = Some(&owner);
 
     match c.labels.get(LABEL_ENABLE).map(String::as_str) {
         None | Some("true") => {}
@@ -170,24 +186,30 @@ fn route_for(
         Err(reason) => return unrouted(ws, reason),
     };
 
+    let host = match &owner.workspace {
+        Some(label) => format!("{service}.{label}.{}.localhost", owner.project),
+        None => format!("{service}.{}.localhost", owner.project),
+    };
     Outcome::Route(Route {
-        host: format!(
-            "{service}.{}.{}.localhost",
-            workspace.label, workspace.project
-        ),
+        host,
         target,
-        project: workspace.project.clone(),
-        workspace: workspace.label.clone(),
+        project: owner.project,
+        workspace: owner.workspace,
         service,
         container: c.name.clone(),
     })
 }
 
-fn membership<'a>(
-    workspaces: &'a [Record],
+fn membership(
+    workspaces: &[Record],
+    shared: &[SharedStack],
     c: &Container,
     canonicalize: &impl Fn(&Path) -> PathBuf,
-) -> Result<Option<&'a Record>, String> {
+) -> Result<Option<Owner>, String> {
+    let of = |w: &Record| Owner {
+        project: w.project.clone(),
+        workspace: Some(w.label.clone()),
+    };
     let project = c.labels.get(LABEL_PROJECT);
     let label = c.labels.get(LABEL_WORKSPACE);
     match (project, label) {
@@ -195,7 +217,7 @@ fn membership<'a>(
             return workspaces
                 .iter()
                 .find(|w| &w.project == project && &w.label == label)
-                .map(Some)
+                .map(|w| Some(of(w)))
                 .ok_or_else(|| {
                     format!("no registered workspace {label:?} in project {project:?}")
                 });
@@ -211,10 +233,17 @@ fn membership<'a>(
         return Ok(None);
     };
     let dir = canonicalize(Path::new(dir));
+    if let Some(stack) = shared.iter().find(|s| s.config_dir == dir) {
+        return Ok(Some(Owner {
+            project: stack.project.clone(),
+            workspace: None,
+        }));
+    }
     Ok(workspaces
         .iter()
         .filter(|w| dir.starts_with(&w.path))
-        .max_by_key(|w| w.path.components().count()))
+        .max_by_key(|w| w.path.components().count())
+        .map(of))
 }
 
 fn target(c: &Container) -> Result<SocketAddr, String> {
@@ -324,6 +353,13 @@ mod tests {
         ]
     }
 
+    fn shared() -> Vec<SharedStack> {
+        vec![SharedStack {
+            project: "myproj".into(),
+            config_dir: "/cfg/cyamus/projects/myproj".into(),
+        }]
+    }
+
     fn bind(container_port: u16, ip: &str, host_port: u16) -> PortBinding {
         PortBinding {
             container_port,
@@ -354,7 +390,7 @@ mod tests {
     }
 
     fn table(containers: &[Container]) -> Table {
-        resolve(&workspaces(), containers, Path::to_path_buf)
+        resolve(&workspaces(), &shared(), containers, Path::to_path_buf)
     }
 
     fn only_reason(t: &Table) -> &str {
@@ -629,10 +665,63 @@ mod tests {
     #[test]
     fn working_dir_is_canonicalized() {
         let c = compose("a", "web", "/tmp/w/feat", vec![bind(3000, "0.0.0.0", 1)]);
-        let t = resolve(&workspaces(), &[c], |p| {
+        let t = resolve(&workspaces(), &shared(), &[c], |p| {
             PathBuf::from(p.to_string_lossy().replacen("/tmp", "", 1))
         });
         assert!(t.get("web.feat-x.myproj.localhost").is_some());
+    }
+
+    #[test]
+    fn shared_stack_routes_without_branch() {
+        let c = compose(
+            "myproj-mailpit-1",
+            "mailpit",
+            "/cfg/cyamus/projects/myproj",
+            vec![bind(8025, "0.0.0.0", 49200)],
+        );
+        let t = table(&[c]);
+        let route = t.get("mailpit.myproj.localhost").unwrap();
+        assert_eq!(route.workspace, None);
+        assert_eq!(route.target, "127.0.0.1:49200".parse().unwrap());
+    }
+
+    #[test]
+    fn shared_stack_opt_out_and_other_dirs() {
+        let db = with(
+            compose(
+                "myproj-db-1",
+                "db",
+                "/cfg/cyamus/projects/myproj",
+                vec![bind(5432, "0.0.0.0", 1)],
+            ),
+            &[(LABEL_ENABLE, "false")],
+        );
+        let t = table(&[db]);
+        assert!(only_reason(&t).contains("opted out"));
+        assert_eq!(t.unrouted[0].project.as_deref(), Some("myproj"));
+        assert_eq!(t.unrouted[0].workspace, None);
+        // A subdirectory of a config dir is not the shared stack.
+        let sub = compose(
+            "x",
+            "web",
+            "/cfg/cyamus/projects/myproj/assets",
+            vec![bind(80, "0.0.0.0", 1)],
+        );
+        assert_eq!(table(&[sub]), Table::default());
+    }
+
+    #[test]
+    fn explicit_labels_beat_shared_dir() {
+        let c = with(
+            compose(
+                "a",
+                "web",
+                "/cfg/cyamus/projects/myproj",
+                vec![bind(80, "0.0.0.0", 1)],
+            ),
+            &[(LABEL_PROJECT, "myproj"), (LABEL_WORKSPACE, "main")],
+        );
+        assert!(table(&[c]).get("web.main.myproj.localhost").is_some());
     }
 
     #[test]

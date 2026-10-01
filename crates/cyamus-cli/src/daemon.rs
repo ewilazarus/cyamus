@@ -112,6 +112,7 @@ fn render(status: &Status, redirected: bool) -> String {
         for u in &status.unrouted {
             let owner = match (&u.project, &u.workspace) {
                 (Some(p), Some(w)) => format!(" ({p}/{w})"),
+                (Some(p), None) => format!(" ({p}/shared)"),
                 _ => String::new(),
             };
             out.push_str(&format!("  {}{owner}: {}\n", u.container, u.reason));
@@ -555,7 +556,7 @@ mod tests {
                 host: "web.feat-x.myproj.localhost".into(),
                 target: "127.0.0.1:49321".parse().unwrap(),
                 project: "myproj".into(),
-                workspace: "feat-x".into(),
+                workspace: Some("feat-x".into()),
                 service: "web".into(),
                 container: "feat-x-web-1".into(),
             }],

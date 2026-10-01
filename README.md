@@ -96,6 +96,8 @@ Until the config directory exists, `setup` and `teardown` print a notice and exi
 | `cyamus daemon stop` | Stops the routing daemon. |
 | `cyamus daemon install [--dry-run]` | One-time, uses `sudo`: redirects port 80 to the daemon (this machine only), so URLs need no port. `uninstall` removes it. |
 | `cyamus daemon run` | Runs the routing daemon in the foreground. You rarely need this, because setup starts it for you. |
+| `cyamus compose [args…]` | `docker compose` for this worktree's stack, with shared services left out and reachable by name ([Docker](#docker)). |
+| `cyamus compose-shared [args…]` | `docker compose` for the project's shared stack in `<config>/compose.yaml`. |
 | `cyamus edit [path]` | Opens the project config directory in `$EDITOR`. |
 
 ## Manifest
@@ -240,9 +242,31 @@ The relay forwards to the daemon port in use at install time: if you change `CYA
 
 ## Docker
 
-Containers become routes without any cyamus-specific configuration. When `docker compose` runs inside a worktree, the daemon matches the container's compose working directory against registered worktrees, and names the route after the compose service.
+Containers become routes without any cyamus-specific configuration. When compose runs inside a worktree, the daemon matches the container's compose working directory against registered worktrees, and names the route after the compose service.
 
-The usual setup keeps the compose file in the project's `assets/` and runs it from hooks:
+Run compose through cyamus, from hooks and from your terminal:
+
+| | Stack | Compose project | Files |
+|---|---|---|---|
+| `cyamus compose …` | this worktree's services | `<project>-<branch>` | what `docker compose` would pick here (`compose.yaml` and its override, searching upward), or your `-f` files |
+| `cyamus compose-shared …` | services shared by every worktree | `<project>` | `<config>/compose.yaml` |
+
+Arguments are passed through unchanged, and so is the exit code. Both commands give compose the same `CYAMUS_*` variables hooks get, so `${CYAMUS_DOMAIN}` and friends interpolate the same everywhere. Docker Compose 2.24.4 or later is required.
+
+### Shared services
+
+Put services that every worktree can share (a database, a cache, a mail catcher) in `<config>/compose.yaml`. When a worktree's compose file defines a service **with the same name**, `cyamus compose` uses the shared one instead:
+
+- **No duplicates.** The worktree's own `db` isn't started. Services that depended on it keep their other dependencies.
+- **Reachable by name.** `web` reaches the shared service at `db:5432`, as if it were in its own stack. Each worktree gets a private network (`cyamus-<project>-<branch>`) that only it and the shared services join, so worktrees never see each other.
+- **Started on demand.** `cyamus compose up` and `cyamus compose run` start the shared stack first if it isn't fully running. It keeps running when worktrees are torn down; stop it with `cyamus compose-shared down`.
+- **Visible.** `cyamus compose` prints the services it takes from the shared stack (`using shared: db`).
+- **Routed.** Shared HTTP services get `http://<service>.<project>.localhost/`. In the shared stack, `CYAMUS_DOMAIN` is `<project>.localhost`.
+- **Untouched files.** Your compose files are never edited. cyamus passes a generated override (in `$XDG_STATE_HOME/cyamus/compose/`) as the last `-f`.
+
+The shared stack is configured the same whichever worktree starts it: it gets project-level variables only (no branch variables, no fingerprints, manifest `[vars]` as written).
+
+### A typical setup
 
 ```toml
 [[copy]]
@@ -250,10 +274,10 @@ source = "compose.yaml"
 target = "compose.yaml"
 
 [[hooks.on_setup]]
-commands = ["docker compose up -d"]
+commands = ["cyamus compose up -d"]
 
 [[hooks.on_teardown]]
-commands = ["docker compose down"]
+commands = ["cyamus compose down"]
 ```
 
 ```yaml
@@ -270,20 +294,15 @@ services:
     labels:
       cyamus.port: "8080"         # several published ports: pick the one to route
       cyamus.service: backend     # route as backend.<branch>.<project>.localhost
-  db:
-    image: postgres:16
-    ports: ["5432"]
-    labels:
-      cyamus.enable: "false"      # don't route it
 ```
 
 This produces `http://web.<branch>.<project>.localhost/` and `http://backend.<branch>.<project>.localhost/` in every worktree.
 
 - **Publish ports without a host port** (`"3000"`, not `"3000:3000"`). Docker then picks a free port for each worktree, and the daemon finds it. A fixed host port collides as soon as two worktrees run the stack.
-- **The repository already tracks a `compose.yaml`?** Copy your asset to `compose.override.yaml` instead. Compose merges it in automatically, so your labels and port changes apply without touching the team's file.
-- **Each worktree gets its own stack.** Hooks see `COMPOSE_PROJECT_NAME=<project>-<branch>`. If you run `docker compose` by hand in a terminal, that variable isn't set: export it first, or compose starts a second stack under the directory's name. `cyamus daemon status` then shows the containers of the second stack as duplicates.
+- **The repository already tracks a `compose.yaml`?** Copy your asset to `compose.override.yaml` instead. Compose merges it in automatically, so your labels and port changes apply without touching the team's file. Or skip the asset entirely, and let shared services replace the repo's own.
+- **Use `cyamus compose` in your terminal too.** Plain `docker compose` doesn't know the stack's name, the shared services or the variables, so it would start a second stack. `cyamus daemon status` would then show its containers as duplicates.
 - **Containers talk to each other by service name** (`http://api:8080`), as usual in compose. Inside a container, `*.localhost` is the container itself.
-- Only published ports are routed. The daemon never uses container IPs, so it works the same with Docker Desktop, OrbStack, Colima and Linux. It finds Docker through `DOCKER_HOST`, then the current `docker context`, then `/var/run/docker.sock`.
+- **Only published ports are routed.** The daemon never uses container IPs, so it works the same with Docker Desktop, OrbStack, Colima and Linux. It finds Docker through `DOCKER_HOST`, then the current `docker context`, then `/var/run/docker.sock`.
 
 | Label | Effect |
 |---|---|
@@ -291,6 +310,69 @@ This produces `http://web.<branch>.<project>.localhost/` and `http://backend.<br
 | `cyamus.service` | Route name, instead of the compose service name |
 | `cyamus.port` | Container port to route, when the container publishes more than one |
 | `cyamus.project` + `cyamus.workspace` | Attach a container that compose didn't start in the worktree (e.g. `docker run`) to `<project>` and `<branch>`. Set both or neither. |
+
+### Example: one Postgres, a database per worktree
+
+One Postgres for the whole project, with its own database for each worktree. The repository's compose file can keep defining `db` for people who don't use cyamus; `cyamus compose` shadows it.
+
+```yaml
+# <config>/compose.yaml  (shared)
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 15
+    labels:
+      cyamus.enable: "false"      # not HTTP; don't route it
+  mailpit:
+    image: axllent/mailpit
+    ports: ["8025"]               # → http://mailpit.<project>.localhost/
+volumes:
+  pgdata: {}
+```
+
+```yaml
+# compose.yaml  (the worktree's; for example the repository's own)
+services:
+  web:
+    build: .
+    ports: ["3000"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/app_${CYAMUS_BRANCH_SNAKE}
+    depends_on: [db]
+  db:                             # shadowed by the shared db
+    image: postgres:16
+```
+
+```sh
+#!/bin/sh
+# bin/create_db: create this worktree's database once
+db="app_${CYAMUS_BRANCH_SNAKE}"
+cyamus compose-shared exec -T db psql -U postgres -tAc \
+  "SELECT 1 FROM pg_database WHERE datname = '$db'" | grep -q 1 ||
+  cyamus compose-shared exec -T db createdb -U postgres "$db"
+```
+
+```sh
+#!/bin/sh
+# bin/drop_db
+cyamus compose-shared exec -T db dropdb -U postgres --if-exists --force "app_${CYAMUS_BRANCH_SNAKE}"
+```
+
+```toml
+[[hooks.on_setup]]
+commands = ["cyamus compose-shared up -d --wait", "create_db", "cyamus compose up -d"]
+
+[[hooks.on_teardown]]
+commands = ["cyamus compose down", "drop_db"]
+```
+
+The scripts expand `$CYAMUS_BRANCH_SNAKE` themselves, so each worktree's hooks create and drop that worktree's database. `cyamus compose-shared up -d --wait` makes sure Postgres is healthy before `create_db` runs.
 
 ## Platform support
 

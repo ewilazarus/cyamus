@@ -63,7 +63,12 @@ async fn container_routes_follow_docker_events() {
         })
         .unwrap();
     let endpoint = docker::resolve_endpoint(|k| std::env::var_os(k));
-    let state = Arc::new(State::new(registry, endpoint.clone(), 1355));
+    let state = Arc::new(State::new(
+        registry,
+        root.join("projects"),
+        endpoint.clone(),
+        1355,
+    ));
     tokio::spawn(docker::watch(endpoint, Arc::clone(&state)));
     wait_for(&state, "docker connection", State::docker_reachable).await;
 

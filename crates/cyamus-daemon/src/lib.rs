@@ -77,7 +77,8 @@ pub fn run(
 
     let endpoint = docker::resolve_endpoint(&env);
     let registry = Registry::new(dirs.registry_dir(), dirs.registry_lock());
-    let state = Arc::new(State::new(registry, endpoint.clone(), port));
+    let projects = dirs.config_home.join("cyamus").join("projects");
+    let state = Arc::new(State::new(registry, projects, endpoint.clone(), port));
     let addrs: Vec<String> = listeners
         .iter()
         .filter_map(|l| l.local_addr().ok())

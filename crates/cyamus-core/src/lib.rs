@@ -4,6 +4,7 @@
 //! or Docker crates; those belong to `cyamus-daemon`.
 
 pub mod assets;
+pub mod compose;
 pub mod daemon;
 pub mod env;
 pub mod exclude;

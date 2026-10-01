@@ -67,8 +67,28 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 DaemonCommand::Relay { .. } => unreachable!("handled above"),
             }
         }
+        Command::Compose { args } => compose(&args, false, &mut reporter),
+        Command::ComposeShared { args } => compose(&args, true, &mut reporter),
         Command::Edit { path } => edit::run(path, &mut reporter).map(|()| ExitCode::SUCCESS),
     }
+}
+
+fn compose(
+    args: &[String],
+    shared: bool,
+    reporter: &mut StderrReporter,
+) -> anyhow::Result<ExitCode> {
+    let dirs = Dirs::from_env()?;
+    let port = daemon::port()?;
+    let control = daemon::Spawner { dirs: &dirs, port };
+    let cwd = std::env::current_dir().context("cannot determine the current directory")?;
+    let run = if shared {
+        cyamus_core::compose::shared
+    } else {
+        cyamus_core::compose::worktree
+    };
+    let code = run(&cwd, args, &dirs, &control, reporter)?;
+    Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
 fn resolve_path(args: &LifecycleArgs) -> anyhow::Result<PathBuf> {
