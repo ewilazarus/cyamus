@@ -1,0 +1,73 @@
+schema: spec-driven
+
+context: |
+  cyamus is a Rust CLI that companions the Orca ADE (https://www.onorca.dev/).
+  Orca owns the UI and creates/deletes git worktrees; cyamus manages the
+  worktree environment lifecycle in an opinionated way. (Cyamus orcini is an
+  orca parasite, hence the name.)
+
+  Origin: a Rust port of git-workspace (https://github.com/ewilazarus/git-workspace),
+  reshaped for Orca. Backwards compatibility with git-workspace is NOT required
+  (manifest format, env vars, layout, commands may all change).
+
+  Vocabulary:
+  - project: per-repository configuration shared by all its worktrees.
+    Identified by the git config key `cyamus.project`, stored in the git common
+    dir (works for bare and regular checkouts alike). If unset on first setup,
+    it is guessed from the `origin` remote's repo name, written to git config,
+    and reported to the user.
+  - workspace: one Orca-created worktree with cyamus goodies (assets, hooks,
+    ports, routes) applied to it.
+
+  Orca integration (no Orca plugin; commands hardcoded in Orca lifecycle scripts):
+  - Orca setup script    -> `cyamus workspace setup`   (idempotent; also serves as "reset")
+  - Orca teardown script -> `cyamus workspace teardown` (runs hooks, releases state;
+    NEVER deletes the worktree directory or branch: Orca does that)
+  - cyamus does not create or remove worktrees. No up/down/rm/ls/prune, no
+    on_attach/on_detach (Orca has no session concept).
+
+  Commands (current scope): `cyamus workspace setup`, `cyamus workspace teardown`,
+  `cyamus edit` (opens $EDITOR on the project config directory), `cyamus doctor`,
+  `cyamus compose`. Future: `cyamus daemon ...`.
+
+  Paths (always XDG, including on macOS: ~/.config and ~/.local/state, not ~/Library):
+  - config: $XDG_CONFIG_HOME/cyamus/projects/<project>/{cyamus.toml, assets/, bin/, compose.yaml}
+  - state:  $XDG_STATE_HOME/cyamus/ (registry, locks, daemon socket/pid/log, local CA)
+  - cache:  $XDG_CACHE_HOME/cyamus/projects/<project>/ exposed to hooks as CYAMUS_CACHE_DIR;
+    per-project, shared by all workspaces, outlives worktrees, never cleaned by cyamus
+
+  Environment variables exposed to hooks and templates use the CYAMUS_* prefix.
+
+  Fingerprints: `[[fingerprint]]` manifest entries hash a list of worktree files
+  (sha256, truncated) and expose CYAMUS_FINGERPRINT_<NAME>; hooks compare them
+  against values they store in CYAMUS_CACHE_DIR to skip unchanged work.
+
+  Templating: `upon` crate. Plain variable substitution, no logic in templates;
+  per-branch variation is expressed via `conditions` on manifest entries.
+  Unknown variables are an error at render time; `cyamus doctor` also flags them.
+
+  Services & ports:
+  - `[[service]]` entries in the manifest declare names only, never ports.
+  - Ports are allocated per workspace from a range, unique machine-wide, stable
+    across repeated setups, released on teardown. Exposed as CYAMUS_PORT_<SVC>.
+  - Registry is file-based, written by the CLI, read-only for the daemon:
+    $XDG_STATE_HOME/cyamus/workspaces/<project>/<branch-slug>.toml, one file per
+    workspace, guarded by a flock on registry.lock, atomic write (temp + rename).
+    Entries whose worktree path no longer exists are garbage-collected.
+
+  Daemon (future iteration): a single machine-wide reverse proxy serving all
+  projects/workspaces. Same binary (`cyamus daemon run`), code well split.
+  Spawned on demand by the CLI (flock + detached process group), never prompts;
+  privileged one-time steps (CA trust, port 443) live in an explicit interactive
+  install command. Hostnames: <svc>.<branch-slug>.<project>.localhost. Discovery
+  via the file registry ([[service]]) and Docker labels (cyamus.*; published
+  ephemeral host ports read via the Docker API). Proxy built on an off-the-shelf
+  crate (axum-reverse-proxy vs pingora, to be decided by spike); rustls + rcgen
+  for per-SNI certificates; bollard for Docker. Must support WebSockets (HMR).
+  The project compose file is separate: workspace-scoped, long-lived shared
+  services (db, redis), not a daemon concern.
+
+  Platform: developed and verified on macOS; Linux expected; Windows unsupported.
+
+# Planned change sequence:
+#   port-core -> port-rest -> templating -> orca-integration -> daemon-registry -> daemon-proxy
