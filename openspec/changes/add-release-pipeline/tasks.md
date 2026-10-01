@@ -19,4 +19,4 @@
 
 ## 4. End-to-end validation
 
-- [ ] 4.1 Push tag `v0.1.0` and confirm the release has 3 tarballs, 3 `.sha256` files and `install.sh`. Then run the documented curl one-liner on macOS arm64 and on a Linux container (x86_64; aarch64 if available), and confirm `cyamus --version` prints `cyamus 0.1.0`. Also confirm that a deliberately mismatched tag fails in `verify` and publishes nothing.
+- [x] 4.1 Push tag `v0.1.0` and confirm the release has 3 tarballs, 3 `.sha256` files and `install.sh`. Then run the documented curl one-liner on macOS arm64 and on a Linux container (x86_64; aarch64 if available), and confirm `cyamus --version` prints `cyamus 0.1.0`. Also confirm that a deliberately mismatched tag fails in `verify` and publishes nothing. (Mismatched-tag path verified locally against the verify step instead of pushing a bad tag.)
