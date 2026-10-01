@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Must equal the rustc version in devbox.json (checked below).
+  RUST_TOOLCHAIN: "1.97.1"
+
 jobs:
   check:
     strategy:
@@ -14,10 +18,22 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: jetify-com/devbox-install-action@v0.15.0
+      - name: Toolchain matches devbox.json
+        run: |
+          devbox=$(jq -r '.packages[]' devbox.json | sed -n 's/^rustc@//p')
+          if [ "$devbox" != "$RUST_TOOLCHAIN" ]; then
+            echo "::error::RUST_TOOLCHAIN is $RUST_TOOLCHAIN but devbox.json pins rustc@$devbox"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@master
         with:
-          enable-cache: true
-      - name: Lint
-        run: devbox run lint
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # Same commands as `devbox run lint` / `devbox run test`.
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
-        run: devbox run test
+        run: cargo test --workspace

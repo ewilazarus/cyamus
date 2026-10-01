@@ -7,25 +7,43 @@ on:
 permissions:
   contents: read
 
+env:
+  # Must equal the rustc version in devbox.json (checked in `verify`).
+  RUST_TOOLCHAIN: "1.97.1"
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: jetify-com/devbox-install-action@v0.15.0
+      - name: Toolchain matches devbox.json
+        run: |
+          devbox=$(jq -r '.packages[]' devbox.json | sed -n 's/^rustc@//p')
+          if [ "$devbox" != "$RUST_TOOLCHAIN" ]; then
+            echo "::error::RUST_TOOLCHAIN is $RUST_TOOLCHAIN but devbox.json pins rustc@$devbox"
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@master
         with:
-          enable-cache: true
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - name: Tag matches crate version
         run: |
-          crate=$(devbox run -- cargo metadata --no-deps --format-version 1 \
+          crate=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "cyamus-cli") | .version')
           tag="${GITHUB_REF_NAME#v}"
           if [ "$crate" != "$tag" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match workspace version $crate in Cargo.toml"
             exit 1
           fi
-      - name: Lint and test
-        run: devbox run check
+      # Same commands as `devbox run check`.
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
 
   build:
     needs: verify
@@ -42,10 +60,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      # Keep in sync with the rustc version in devbox.json.
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - name: Install musl tools
         if: runner.os == 'Linux'
