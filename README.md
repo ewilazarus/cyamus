@@ -159,11 +159,6 @@ if [ "$CYAMUS_FINGERPRINT_DOCKER_DEPS" != "$(cat "$state" 2>/dev/null)" ]; then
 fi
 ```
 
-## Migrating from git-workspace
-
-1. Move `.workspace/manifest.toml` to `~/.config/cyamus/projects/<project>/cyamus.toml`, and move `assets/` and `bin/` next to it.
-2. Remove keys cyamus doesn't support: `base_branch`, `[prune]`, `on_attach`, `on_detach`, and fingerprint `algorithm`.
-3. Rename `GIT_WORKSPACE_*` to `CYAMUS_*` in scripts. `GIT_WORKSPACE_WORKTREE` becomes `CYAMUS_WORKSPACE`. State kept under `$GIT_WORKSPACE_ROOT` or in `git workspace cache` moves to `$CYAMUS_CACHE_DIR`.
-4. Update Orca's scripts (see [Orca setup](#orca-setup)).
+## Platform support
 
 Developed and verified on macOS. Linux is expected to work. Windows is not supported.
