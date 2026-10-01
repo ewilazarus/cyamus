@@ -228,3 +228,83 @@ fn teardown_hook_failure_exits_non_zero() {
         "{err}"
     );
 }
+
+// --- workspace registry (add-daemon-proxy) ---
+
+#[test]
+fn setup_registers_before_hooks() {
+    let (env, _repo, wt) = configured();
+    env.write_manifest(
+        "myproj",
+        "[[hooks.on_setup]]\n\
+         commands = ['cp \"$XDG_STATE_HOME/cyamus/workspaces/myproj/feature-my-thing.toml\" seen.toml']\n",
+    );
+    env.workspace("setup", &wt).assert().success();
+    let seen = fs::read_to_string(wt.join("seen.toml")).unwrap();
+    assert!(seen.contains("branch = \"feature/My-Thing\""), "{seen}");
+    assert!(
+        seen.contains(&format!("path = \"{}\"", wt.display())),
+        "{seen}"
+    );
+    assert_eq!(env.record("myproj", "feature-my-thing"), Some(seen));
+}
+
+#[test]
+fn teardown_unregisters() {
+    let (env, _repo, wt) = configured();
+    env.write_manifest("myproj", "");
+    env.workspace("setup", &wt).assert().success();
+    assert!(env.record("myproj", "feature-my-thing").is_some());
+    env.workspace("teardown", &wt).assert().success();
+    assert!(env.record("myproj", "feature-my-thing").is_none());
+    assert!(wt.exists());
+}
+
+#[test]
+fn failed_teardown_hook_still_unregisters() {
+    let (env, _repo, wt) = configured();
+    env.write_manifest("myproj", "[[hooks.on_teardown]]\ncommands = ['exit 1']\n");
+    env.workspace("setup", &wt).assert().success();
+    env.workspace("teardown", &wt).assert().failure();
+    assert!(env.record("myproj", "feature-my-thing").is_none());
+}
+
+#[test]
+fn label_conflict_warns_and_keeps_first() {
+    let (env, repo, first) = configured();
+    env.write_manifest("myproj", "[[hooks.on_setup]]\ncommands = ['touch ran']\n");
+    let a = env.add_worktree(&repo, "Feature_X");
+    let b = env.add_worktree(&repo, "feature-x");
+    env.workspace("setup", &a).assert().success();
+    let assert = env.workspace("setup", &b).assert().success();
+    let err = stderr(&assert);
+    assert!(
+        err.contains("warning:") && err.contains(a.to_str().unwrap()),
+        "{err}"
+    );
+    assert!(b.join("ran").exists(), "hooks still run");
+    let record = env.record("myproj", "feature-x").unwrap();
+    assert!(record.contains(a.to_str().unwrap()), "{record}");
+    // Re-running setup on the owner is not a conflict.
+    let again = env.workspace("setup", &a).assert().success();
+    assert!(!stderr(&again).contains("warning:"));
+    drop(first);
+}
+
+#[test]
+fn branch_without_usable_label_warns() {
+    let (env, repo, _wt) = configured();
+    env.write_manifest("myproj", "[[hooks.on_setup]]\ncommands = ['touch ran']\n");
+    let wt = env.add_worktree(&repo, "___");
+    let assert = env.workspace("setup", &wt).assert().success();
+    assert!(stderr(&assert).contains("gets no routes"));
+    assert!(wt.join("ran").exists());
+    assert!(!env.state_home.join("cyamus/workspaces/myproj").exists());
+}
+
+#[test]
+fn unconfigured_project_registers_nothing() {
+    let (env, _repo, wt) = configured();
+    env.workspace("setup", &wt).assert().success();
+    assert!(!env.state_home.join("cyamus/workspaces").exists());
+}

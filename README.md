@@ -90,8 +90,12 @@ Until the config directory exists, `setup` and `teardown` print a notice and exi
 
 | Command | What it does |
 |---|---|
-| `cyamus workspace setup [path] [--var K=V]...` | Applies assets, computes fingerprints, runs `on_setup` hooks. Idempotent; re-run it to reset a workspace. |
-| `cyamus workspace teardown [path] [--var K=V]...` | Computes fingerprints, runs `on_teardown` hooks. Never deletes anything. |
+| `cyamus workspace setup [path] [--var K=V]...` | Applies assets, computes fingerprints, registers the workspace, starts the [routing daemon](#daemon-and-routing) if needed, and runs `on_setup` hooks. Idempotent; re-run it to reset a workspace. |
+| `cyamus workspace teardown [path] [--var K=V]...` | Computes fingerprints, runs `on_teardown` hooks, unregisters the workspace. Never deletes anything in the worktree. |
+| `cyamus daemon status` | Shows the routing daemon, its routes, and containers it isn't routing (with the reason). Exits 1 when the daemon isn't running. |
+| `cyamus daemon stop` | Stops the routing daemon. |
+| `cyamus daemon install [--dry-run]` | One-time, uses `sudo`: redirects port 80 to the daemon (this machine only), so URLs need no port. `uninstall` removes it. |
+| `cyamus daemon run` | Runs the routing daemon in the foreground. You rarely need this, because setup starts it for you. |
 | `cyamus edit [path]` | Opens the project config directory in `$EDITOR`. |
 
 ## Manifest
@@ -171,6 +175,10 @@ Hooks inherit cyamus's environment, plus:
 | `CYAMUS_EVENT` | `setup` or `teardown` |
 | `CYAMUS_VAR_*` | Manifest `[vars]`, overridden by `--var KEY=VALUE` |
 | `CYAMUS_FINGERPRINT_*` | Fingerprint digests |
+| `CYAMUS_DOMAIN` | `feature-my-thing.my-proj.localhost`: append it to a service name to get its [hostname](#daemon-and-routing) |
+| `CYAMUS_PROXY_PORT` | Port the routing daemon listens on (default `1355`) |
+| `CYAMUS_URL_SUFFIX` | What goes after a hostname in a URL: empty once [`cyamus daemon install`](#urls-without-a-port) is in place, `:1355` before. `http://web.${CYAMUS_DOMAIN}${CYAMUS_URL_SUFFIX}` is always right. |
+| `COMPOSE_PROJECT_NAME` | `my-proj-feature-my-thing`, so each worktree gets its own compose stack. Not set if your environment already sets it. |
 
 ### Fingerprints and the cache directory
 
@@ -187,6 +195,102 @@ if [ "$CYAMUS_FINGERPRINT_DOCKER_DEPS" != "$(cat "$state" 2>/dev/null)" ]; then
     echo "$CYAMUS_FINGERPRINT_DOCKER_DEPS" > "$state"
 fi
 ```
+
+## Daemon and routing
+
+Every service of a workspace gets a stable URL:
+
+```
+http://<service>.<branch>.<project>.localhost/
+```
+
+For example, `http://web.feature-my-thing.my-proj.localhost/`. `<branch>` is `CYAMUS_BRANCH_SLUG`, cut to 63 characters. Browsers, curl and most runtimes resolve `*.localhost` to your machine without any DNS setup, so the URL works from host processes too.
+
+A small routing daemon serves these URLs. It's built into the `cyamus` binary:
+
+- `cyamus workspace setup` starts it in the background if it isn't running, and replaces it after you upgrade cyamus. Set `CYAMUS_DAEMON=off` to keep setup from starting it.
+- It listens only on this machine (`127.0.0.1` and `::1`), on port `1355`, so nothing on your network can reach it. Set `CYAMUS_DAEMON_PORT` to use another port. Setup and the daemon must agree on it, so export it from your shell profile.
+- Run `cyamus daemon install` once to drop the port from URLs (see below). Until then, URLs carry `:1355`, e.g. `http://web.feature-my-thing.my-proj.localhost:1355/`.
+- It runs until `cyamus daemon stop`, logging to `$XDG_STATE_HOME/cyamus/daemon.log` (default `~/.local/state/...`).
+- [`http://cyamus.localhost/`](http://cyamus.localhost/) (or `http://cyamus.localhost:1355/`) lists every route, as does `cyamus daemon status`.
+- It forwards plain HTTP, including WebSockets and server-sent events, so dev-server hot reload works. It keeps the original `Host` header and adds `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-For`.
+- An unknown hostname gets a 404 that lists the routes. A route whose service isn't answering yet gets a 502.
+
+HTTPS isn't supported yet. Setup registers each workspace in `$XDG_STATE_HOME/cyamus/workspaces/`, and teardown removes it. That registry is how the daemon knows which worktrees exist.
+
+### URLs without a port
+
+The daemon itself never listens on port 80. Binding port 80 would mean listening on every network interface, and on macOS that triggers a firewall prompt. Instead, a one-time install adds a tiny **relay**: a system service that listens on `127.0.0.1:80` and `[::1]:80` only, and passes each connection through to the daemon unchanged.
+
+```sh
+cyamus daemon install            # asks for your sudo password
+cyamus daemon install --dry-run  # shows exactly what it would change
+cyamus daemon uninstall          # undoes it
+```
+
+Run it without `sudo`: it prints each command before running it with `sudo`, then checks that `http://cyamus.localhost/` reaches the daemon.
+
+| | What install changes |
+|---|---|
+| Both | `/usr/local/libexec/cyamus-relay`: a root-owned copy of `cyamus` that the service runs. It never runs your own binary, which anything running as you could replace. |
+| macOS | `/Library/LaunchDaemons/dev.cyamus.relay.plist`: starts the relay at boot and restarts it if it exits. Binding port 80 needs root, so the relay binds as root, then handles connections from a child process running as `nobody`. Log: `/var/log/cyamus-relay.log`. |
+| Linux | `/etc/systemd/system/cyamus-relay.service`: runs the relay as an ephemeral unprivileged user (`DynamicUser=yes`) with only `CAP_NET_BIND_SERVICE`. Requires systemd. Log: `journalctl -u cyamus-relay`. |
+
+The relay forwards to the daemon port in use at install time: if you change `CYAMUS_DAEMON_PORT`, run install again. `cyamus daemon status` tells you whether port 80 reaches the running daemon.
+
+## Docker
+
+Containers become routes without any cyamus-specific configuration. When `docker compose` runs inside a worktree, the daemon matches the container's compose working directory against registered worktrees, and names the route after the compose service.
+
+The usual setup keeps the compose file in the project's `assets/` and runs it from hooks:
+
+```toml
+[[copy]]
+source = "compose.yaml"
+target = "compose.yaml"
+
+[[hooks.on_setup]]
+commands = ["docker compose up -d"]
+
+[[hooks.on_teardown]]
+commands = ["docker compose down"]
+```
+
+```yaml
+# assets/compose.yaml
+services:
+  web:
+    build: .
+    ports: ["3000"]               # publish on a random host port; worktrees never collide
+    environment:
+      APP_URL: http://web.${CYAMUS_DOMAIN}${CYAMUS_URL_SUFFIX}
+  api:
+    build: ./api
+    ports: ["8080", "9229"]
+    labels:
+      cyamus.port: "8080"         # several published ports: pick the one to route
+      cyamus.service: backend     # route as backend.<branch>.<project>.localhost
+  db:
+    image: postgres:16
+    ports: ["5432"]
+    labels:
+      cyamus.enable: "false"      # don't route it
+```
+
+This produces `http://web.<branch>.<project>.localhost/` and `http://backend.<branch>.<project>.localhost/` in every worktree.
+
+- **Publish ports without a host port** (`"3000"`, not `"3000:3000"`). Docker then picks a free port for each worktree, and the daemon finds it. A fixed host port collides as soon as two worktrees run the stack.
+- **The repository already tracks a `compose.yaml`?** Copy your asset to `compose.override.yaml` instead. Compose merges it in automatically, so your labels and port changes apply without touching the team's file.
+- **Each worktree gets its own stack.** Hooks see `COMPOSE_PROJECT_NAME=<project>-<branch>`. If you run `docker compose` by hand in a terminal, that variable isn't set: export it first, or compose starts a second stack under the directory's name. `cyamus daemon status` then shows the containers of the second stack as duplicates.
+- **Containers talk to each other by service name** (`http://api:8080`), as usual in compose. Inside a container, `*.localhost` is the container itself.
+- Only published ports are routed. The daemon never uses container IPs, so it works the same with Docker Desktop, OrbStack, Colima and Linux. It finds Docker through `DOCKER_HOST`, then the current `docker context`, then `/var/run/docker.sock`.
+
+| Label | Effect |
+|---|---|
+| `cyamus.enable` | `"false"` excludes the container. Everything else in a workspace is routed by default. |
+| `cyamus.service` | Route name, instead of the compose service name |
+| `cyamus.port` | Container port to route, when the container publishes more than one |
+| `cyamus.project` + `cyamus.workspace` | Attach a container that compose didn't start in the worktree (e.g. `docker run`) to `<project>` and `<branch>`. Set both or neither. |
 
 ## Platform support
 

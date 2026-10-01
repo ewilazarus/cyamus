@@ -17,6 +17,7 @@ pub enum PathsError {
 pub struct Dirs {
     pub config_home: PathBuf,
     pub cache_home: PathBuf,
+    pub state_home: PathBuf,
 }
 
 impl Dirs {
@@ -40,6 +41,7 @@ impl Dirs {
         Ok(Self {
             config_home: xdg("XDG_CONFIG_HOME", ".config"),
             cache_home: xdg("XDG_CACHE_HOME", ".cache"),
+            state_home: xdg("XDG_STATE_HOME", ".local/state"),
         })
     }
 
@@ -57,6 +59,36 @@ impl Dirs {
             .join("cyamus")
             .join("projects")
             .join(project)
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/`: workspace registry and daemon runtime files.
+    pub fn state_dir(&self) -> PathBuf {
+        self.state_home.join("cyamus")
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/workspaces/`
+    pub fn registry_dir(&self) -> PathBuf {
+        self.state_dir().join("workspaces")
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/registry.lock`
+    pub fn registry_lock(&self) -> PathBuf {
+        self.state_dir().join("registry.lock")
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/daemon.pid`
+    pub fn daemon_pid(&self) -> PathBuf {
+        self.state_dir().join("daemon.pid")
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/daemon.lock`
+    pub fn daemon_lock(&self) -> PathBuf {
+        self.state_dir().join("daemon.lock")
+    }
+
+    /// `$XDG_STATE_HOME/cyamus/daemon.log`
+    pub fn daemon_log(&self) -> PathBuf {
+        self.state_dir().join("daemon.log")
     }
 }
 
@@ -124,6 +156,32 @@ mod tests {
         let d = dirs(&[("HOME", "/home/u")]);
         assert_eq!(d.config_home, PathBuf::from("/home/u/.config"));
         assert_eq!(d.cache_home, PathBuf::from("/home/u/.cache"));
+        assert_eq!(d.state_home, PathBuf::from("/home/u/.local/state"));
+    }
+
+    #[test]
+    fn state_paths() {
+        let d = dirs(&[("HOME", "/home/u"), ("XDG_STATE_HOME", "/tmp/state")]);
+        assert_eq!(
+            d.registry_dir(),
+            PathBuf::from("/tmp/state/cyamus/workspaces")
+        );
+        assert_eq!(
+            d.registry_lock(),
+            PathBuf::from("/tmp/state/cyamus/registry.lock")
+        );
+        assert_eq!(
+            d.daemon_pid(),
+            PathBuf::from("/tmp/state/cyamus/daemon.pid")
+        );
+        assert_eq!(
+            d.daemon_lock(),
+            PathBuf::from("/tmp/state/cyamus/daemon.lock")
+        );
+        assert_eq!(
+            d.daemon_log(),
+            PathBuf::from("/tmp/state/cyamus/daemon.log")
+        );
     }
 
     #[test]
@@ -149,9 +207,11 @@ mod tests {
             ("HOME", "/home/u"),
             ("XDG_CONFIG_HOME", "rel/cfg"),
             ("XDG_CACHE_HOME", ""),
+            ("XDG_STATE_HOME", "state"),
         ]);
         assert_eq!(d.config_home, PathBuf::from("/home/u/.config"));
         assert_eq!(d.cache_home, PathBuf::from("/home/u/.cache"));
+        assert_eq!(d.state_home, PathBuf::from("/home/u/.local/state"));
     }
 
     #[test]

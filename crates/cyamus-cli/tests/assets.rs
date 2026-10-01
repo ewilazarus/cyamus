@@ -182,14 +182,11 @@ fn concurrent_setups_leave_a_well_formed_block() {
     let children: Vec<_> = worktrees
         .iter()
         .map(|wt| {
-            let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin!("cyamus"));
-            cmd.args(["workspace", "setup"])
+            env.std_cyamus()
+                .args(["workspace", "setup"])
                 .arg(wt)
-                .env("HOME", &env.home)
-                .env("XDG_CONFIG_HOME", &env.config_home)
-                .env("XDG_CACHE_HOME", &env.cache_home)
-                .env("GIT_CONFIG_NOSYSTEM", "1");
-            cmd.spawn().unwrap()
+                .spawn()
+                .unwrap()
         })
         .collect();
     for mut child in children {

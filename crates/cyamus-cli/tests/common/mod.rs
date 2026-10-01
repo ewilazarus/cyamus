@@ -17,6 +17,7 @@ pub struct Env {
     pub home: PathBuf,
     pub config_home: PathBuf,
     pub cache_home: PathBuf,
+    pub state_home: PathBuf,
 }
 
 impl Env {
@@ -27,7 +28,8 @@ impl Env {
         let home = root.join("home");
         let config_home = root.join("config");
         let cache_home = root.join("cache");
-        for dir in [&home, &config_home, &cache_home] {
+        let state_home = root.join("state");
+        for dir in [&home, &config_home, &cache_home, &state_home] {
             fs::create_dir_all(dir).unwrap();
         }
         Self {
@@ -36,6 +38,7 @@ impl Env {
             home,
             config_home,
             cache_home,
+            state_home,
         }
     }
 
@@ -46,15 +49,44 @@ impl Env {
         cmd
     }
 
+    /// Like [`Env::cyamus`], as a plain `std::process::Command` (for
+    /// long-running children).
+    pub fn std_cyamus(&self) -> StdCommand {
+        let mut cmd = StdCommand::new(assert_cmd::cargo::cargo_bin!("cyamus"));
+        for (key, value) in self.isolation() {
+            match value {
+                Some(v) => cmd.env(key, v),
+                None => cmd.env_remove(key),
+            };
+        }
+        cmd
+    }
+
+    fn isolation(&self) -> Vec<(&'static str, Option<std::ffi::OsString>)> {
+        vec![
+            ("HOME", Some(self.home.clone().into())),
+            ("XDG_CONFIG_HOME", Some(self.config_home.clone().into())),
+            ("XDG_CACHE_HOME", Some(self.cache_home.clone().into())),
+            ("XDG_STATE_HOME", Some(self.state_home.clone().into())),
+            ("CYAMUS_DAEMON", Some("off".into())),
+            ("CYAMUS_DAEMON_PORT", None),
+            ("COMPOSE_PROJECT_NAME", None),
+            ("SHELL", Some("/bin/sh".into())),
+            ("GIT_CONFIG_NOSYSTEM", Some("1".into())),
+            ("EDITOR", None),
+            ("GIT_DIR", None),
+            ("GIT_WORK_TREE", None),
+        ]
+    }
+
     fn isolate(&self, cmd: &mut Command) {
-        cmd.env("HOME", &self.home)
-            .env("XDG_CONFIG_HOME", &self.config_home)
-            .env("XDG_CACHE_HOME", &self.cache_home)
-            .env("SHELL", "/bin/sh")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env_remove("EDITOR")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE");
+        // Daemon tests opt back in with their own port.
+        for (key, value) in self.isolation() {
+            match value {
+                Some(v) => cmd.env(key, v),
+                None => cmd.env_remove(key),
+            };
+        }
     }
 
     /// Runs git in `dir`, panicking on failure, and returns stdout.
@@ -132,6 +164,16 @@ impl Env {
 
     pub fn set_project(&self, repo: &Path, name: &str) {
         self.git(repo, &["config", "--local", "cyamus.project", name]);
+    }
+
+    /// The registry record for `project`/`label`, if one exists.
+    pub fn record(&self, project: &str, label: &str) -> Option<String> {
+        let file = self
+            .state_home
+            .join("cyamus/workspaces")
+            .join(project)
+            .join(format!("{label}.toml"));
+        fs::read_to_string(file).ok()
     }
 
     pub fn project_dir(&self, project: &str) -> PathBuf {

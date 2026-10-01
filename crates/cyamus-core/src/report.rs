@@ -7,6 +7,11 @@ pub trait Reporter {
     /// An informational message (e.g. a guessed project name).
     fn notice(&mut self, message: &str);
 
+    /// Something went wrong that doesn't stop the operation.
+    fn warning(&mut self, message: &str) {
+        self.notice(&format!("warning: {message}"));
+    }
+
     /// A hook command is about to run.
     fn hook_started(&mut self, event: Event, command: &str);
 }

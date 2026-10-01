@@ -118,13 +118,9 @@ fn parallel_first_setups_agree() {
     let children: Vec<_> = worktrees
         .iter()
         .map(|wt| {
-            std::process::Command::new(assert_cmd::cargo::cargo_bin!("cyamus"))
+            env.std_cyamus()
                 .args(["workspace", "setup"])
                 .arg(wt)
-                .env("HOME", &env.home)
-                .env("XDG_CONFIG_HOME", &env.config_home)
-                .env("XDG_CACHE_HOME", &env.cache_home)
-                .env("GIT_CONFIG_NOSYSTEM", "1")
                 .stderr(std::process::Stdio::null())
                 .spawn()
                 .unwrap()

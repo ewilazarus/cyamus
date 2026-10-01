@@ -107,3 +107,45 @@ fn no_matching_hooks_succeeds() {
     env.workspace("setup", &wt).assert().success();
     env.workspace("teardown", &wt).assert().success();
 }
+
+// --- routing variables (add-daemon-proxy) ---
+
+const DUMP_ROUTING: &str = "[[hooks.on_setup]]\n\
+    commands = ['echo \"$CYAMUS_DOMAIN|$CYAMUS_PROXY_PORT|$CYAMUS_URL_SUFFIX|$COMPOSE_PROJECT_NAME\" > routing']\n";
+
+#[test]
+fn routing_variables() {
+    let (env, wt) = setup("feature/My-Thing");
+    env.write_manifest("myproj", DUMP_ROUTING);
+    env.workspace("setup", &wt).assert().success();
+    assert_eq!(
+        fs::read_to_string(wt.join("routing")).unwrap(),
+        "feature-my-thing.myproj.localhost|1355|:1355|myproj-feature-my-thing\n"
+    );
+}
+
+#[test]
+fn routing_variables_respect_caller() {
+    let (env, wt) = setup("main2");
+    env.write_manifest("myproj", DUMP_ROUTING);
+    env.workspace("setup", &wt)
+        .env("COMPOSE_PROJECT_NAME", "custom")
+        .env("CYAMUS_DAEMON_PORT", "4242")
+        .assert()
+        .success();
+    assert_eq!(
+        fs::read_to_string(wt.join("routing")).unwrap(),
+        "main2.myproj.localhost|4242|:4242|custom\n"
+    );
+}
+
+#[test]
+fn invalid_daemon_port_fails() {
+    let (env, wt) = setup("main2");
+    env.write_manifest("myproj", "");
+    env.workspace("setup", &wt)
+        .env("CYAMUS_DAEMON_PORT", "nope")
+        .assert()
+        .failure()
+        .stderr(contains("CYAMUS_DAEMON_PORT"));
+}

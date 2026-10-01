@@ -1,16 +1,13 @@
 [package]
-name = "cyamus-core"
-description = "Core workspace lifecycle logic for cyamus"
+name = "cyamus-registry"
+description = "On-disk registry of active cyamus workspaces"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-cyamus-registry.workspace = true
-globset.workspace = true
 serde.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
