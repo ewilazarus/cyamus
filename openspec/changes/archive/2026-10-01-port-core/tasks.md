@@ -56,4 +56,4 @@
 ## 10. End-to-end check
 
 - [x] 10.1 Add an end-to-end test that imitates Orca against a bare and a regular repo: `git worktree add`, `cyamus workspace setup` (guessing the project), edit the manifest, run setup again, `cyamus workspace teardown`, then `git worktree remove`; verify it passes on macOS
-- [ ] 10.2 Manually run the Orca flow by replacing the git-workspace calls in one real project's Orca setup/teardown scripts with cyamus; verify a worktree created and closed in Orca's UI gets its assets and runs its hooks
+- [x] 10.2 Manually run the Orca flow by replacing the git-workspace calls in one real project's Orca setup/teardown scripts with cyamus; verify a worktree created and closed in Orca's UI gets its assets and runs its hooks
