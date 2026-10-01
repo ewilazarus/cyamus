@@ -6,11 +6,15 @@ Defines the hostname scheme the daemon serves and how it forwards HTTP and WebSo
 ## Requirements
 
 ### Requirement: Hostname scheme
-A route's hostname SHALL be `<service>.<branch-label>.<project>.localhost`. Matching SHALL be case-insensitive and SHALL ignore the port in the `Host` header and any trailing dot. Hostnames of the form `<name>.<project>.localhost` SHALL NOT be produced by this change; they are reserved for future project-scoped services.
+A workspace route's hostname SHALL be `<service>.<branch-label>.<project>.localhost`. A shared-stack route's hostname SHALL be `<service>.<project>.localhost`. The two shapes have different label counts, so they cannot collide. Matching SHALL be case-insensitive and SHALL ignore the port in the `Host` header and any trailing dot.
 
 #### Scenario: Request for a routed service
 - **WHEN** a request arrives with `Host: Web.Feat-X.myproj.localhost:1355`
 - **THEN** it is matched to the route `web.feat-x.myproj.localhost`
+
+#### Scenario: Request for a shared service
+- **WHEN** a request arrives with `Host: mailpit.myproj.localhost`
+- **THEN** it is matched to the shared-stack route `mailpit.myproj.localhost`
 
 ### Requirement: Request forwarding
 A request for a routed hostname SHALL be forwarded to the route's target over HTTP/1.1. The method, path, query, body and headers SHALL be preserved, except for hop-by-hop headers. The original `Host` header SHALL be preserved. `X-Forwarded-Host`, `X-Forwarded-Proto: http` and `X-Forwarded-For` SHALL be set. The response SHALL be streamed back unchanged.
