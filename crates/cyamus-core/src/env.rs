@@ -1,6 +1,8 @@
 //! The `CYAMUS_*` environment exposed to hooks.
 
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
 use crate::naming::{env_var_suffix, slugify};
 use crate::workspace::Workspace;
@@ -88,6 +90,21 @@ pub fn build(
     env
 }
 
+/// `PATH` with `dir` moved to the front (later duplicates dropped), or
+/// `None` when it already comes first. Hooks get this so that `cyamus`
+/// inside a hook is the binary running setup, even when the caller's PATH
+/// lacks it (Orca started from the Dock).
+pub fn path_with_first(dir: &Path, path: Option<&OsStr>) -> Option<OsString> {
+    let rest: Vec<PathBuf> = path
+        .map(|p| std::env::split_paths(p).collect())
+        .unwrap_or_default();
+    if rest.first().is_some_and(|first| first == dir) {
+        return None;
+    }
+    let entries = std::iter::once(dir.to_owned()).chain(rest.into_iter().filter(|p| p != dir));
+    std::env::join_paths(entries).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +153,25 @@ mod tests {
         assert_eq!(env["CYAMUS_DOMAIN"], "feature-my-thing.myproj.localhost");
         assert_eq!(env["CYAMUS_PROXY_PORT"], "1355");
         assert_eq!(env["CYAMUS_URL_SUFFIX"], ":1355");
+    }
+
+    #[test]
+    fn path_puts_dir_first() {
+        let dir = Path::new("/opt/cyamus/bin");
+        let p = |s: &str| Some(OsString::from(s));
+        assert_eq!(
+            path_with_first(dir, Some(OsStr::new("/usr/bin:/bin"))),
+            p("/opt/cyamus/bin:/usr/bin:/bin")
+        );
+        assert_eq!(
+            path_with_first(dir, Some(OsStr::new("/opt/cyamus/bin:/usr/bin"))),
+            None
+        );
+        assert_eq!(
+            path_with_first(dir, Some(OsStr::new("/usr/bin:/opt/cyamus/bin"))),
+            p("/opt/cyamus/bin:/usr/bin")
+        );
+        assert_eq!(path_with_first(dir, None), p("/opt/cyamus/bin"));
     }
 
     #[test]

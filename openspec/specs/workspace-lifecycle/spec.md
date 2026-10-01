@@ -87,7 +87,12 @@ Hooks SHALL run with the parent process environment plus:
 - `CYAMUS_WORKSPACE` (worktree root), `CYAMUS_CONFIG_DIR`, `CYAMUS_ASSETS`, `CYAMUS_BIN`, `CYAMUS_CACHE_DIR` and `CYAMUS_EVENT`;
 - `CYAMUS_VAR_*` and `CYAMUS_FINGERPRINT_*`;
 - `CYAMUS_DOMAIN` (`<branch-label>.<project>.localhost`), `CYAMUS_PROXY_PORT` (the daemon port), and `CYAMUS_URL_SUFFIX`: empty when port 80 reaches the daemon (see the daemon spec), otherwise `:<daemon port>`;
-- `COMPOSE_PROJECT_NAME` (`<project>-<branch-label>`), unless the parent environment already sets it.
+- `COMPOSE_PROJECT_NAME` (`<project>-<branch-label>`), unless the parent environment already sets it;
+- `PATH`, with the directory of the running `cyamus` executable moved to the front, so `cyamus` inside a hook resolves to the binary running setup even when the caller's `PATH` lacks it.
+
+#### Scenario: cyamus available to hooks
+- **WHEN** setup runs with a `PATH` that doesn't contain cyamus' directory (Orca launched from the Dock), and a hook runs `cyamus compose up -d`
+- **THEN** the hook runs the same `cyamus` binary that is running setup
 
 #### Scenario: Environment for a branch
 - **WHEN** an `on_setup` hook runs for project `myproj` on branch `feature/My-Thing` with the default daemon port

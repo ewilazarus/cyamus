@@ -149,3 +149,42 @@ fn invalid_daemon_port_fails() {
         .failure()
         .stderr(contains("CYAMUS_DAEMON_PORT"));
 }
+
+#[test]
+fn hooks_find_cyamus_without_it_on_path() {
+    // Like Orca launched from the Dock: a minimal PATH without cyamus.
+    let (env, wt) = setup("main2");
+    env.write_manifest(
+        "myproj",
+        "[[hooks.on_setup]]\ncommands = ['command -v cyamus > which', 'cyamus --version > version']\n",
+    );
+    // Keep the git the tests use; only cyamus' own directory is missing.
+    let git = std::process::Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let git_dir = PathBuf::from(String::from_utf8_lossy(&git.stdout).trim())
+        .parent()
+        .unwrap()
+        .to_owned();
+    let exe_dir = assert_cmd::cargo::cargo_bin!("cyamus")
+        .parent()
+        .unwrap()
+        .to_owned();
+    assert_ne!(git_dir, exe_dir);
+    env.workspace("setup", &wt)
+        .env("PATH", format!("{}:/usr/bin:/bin", git_dir.display()))
+        .assert()
+        .success();
+    let found = fs::read_to_string(wt.join("which")).unwrap();
+    let exe = assert_cmd::cargo::cargo_bin!("cyamus");
+    assert_eq!(
+        PathBuf::from(found.trim()).canonicalize().unwrap(),
+        exe.canonicalize().unwrap()
+    );
+    assert!(
+        fs::read_to_string(wt.join("version"))
+            .unwrap()
+            .starts_with("cyamus ")
+    );
+}

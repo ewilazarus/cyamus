@@ -188,6 +188,7 @@ Hooks inherit cyamus's environment, plus:
 | `CYAMUS_DOMAIN` | `feature-my-thing.my-proj.localhost`: append it to a service name to get its [hostname](#daemon-and-routing) |
 | `CYAMUS_PROXY_PORT` | Port the routing daemon listens on (default `1355`) |
 | `CYAMUS_URL_SUFFIX` | What goes after a hostname in a URL: empty once [`cyamus daemon install`](#urls-without-a-port) is in place, `:1355` before. `http://web.${CYAMUS_DOMAIN}${CYAMUS_URL_SUFFIX}` is always right. |
+| `PATH` | Your `PATH`, with the directory of the running `cyamus` first, so hooks can call `cyamus` even when Orca was started from the Dock |
 | `COMPOSE_PROJECT_NAME` | `my-proj-feature-my-thing`, so each worktree gets its own compose stack. Not set if your environment already sets it. |
 
 ### Fingerprints and the cache directory

@@ -188,13 +188,24 @@ fn hook_env(
         proxy_port: daemon.port(),
         url_suffix: &url_suffix,
     };
-    env::build(
+    let mut env = env::build(
         workspace,
         &manifest.vars,
         runtime_vars,
         fingerprints,
         routing,
-    )
+    );
+    // `cyamus …` inside a hook must work even when the caller's PATH lacks
+    // this binary (Orca launched from the Dock has a minimal PATH).
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_owned));
+    if let Some(dir) = exe_dir
+        && let Some(path) = env::path_with_first(&dir, std::env::var_os("PATH").as_deref())
+    {
+        env.insert("PATH".to_owned(), path.to_string_lossy().into_owned());
+    }
+    env
 }
 
 fn run_hooks(
