@@ -29,3 +29,21 @@ fn malformed_runtime_var_fails_before_resolving() {
         .failure()
         .stderr(contains("KEY=VALUE"));
 }
+
+#[test]
+fn closed_stdout_exits_quietly() {
+    // `cyamus … | head` closes the pipe early; that must not be a panic.
+    let env = common::Env::new();
+    let mut child = env
+        .std_cyamus()
+        .args(["daemon", "install", "--dry-run"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert_eq!(out.status.code(), Some(141), "{stderr}");
+}

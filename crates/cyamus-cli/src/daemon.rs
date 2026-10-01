@@ -36,14 +36,14 @@ pub fn status(dirs: &Dirs, port: u16) -> anyhow::Result<ExitCode> {
     let _ = Registry::new(dirs.registry_dir(), dirs.registry_lock()).gc();
     let Some(status) = probe(port) else {
         match running_pid(dirs) {
-            Some(pid) => println!(
+            Some(pid) => outln!(
                 "cyamus daemon (pid {pid}) is running but not answering on port {port}; is CYAMUS_DAEMON_PORT different from when it started?"
             ),
-            None => println!("cyamus daemon is not running"),
+            None => outln!("cyamus daemon is not running"),
         }
         return Ok(ExitCode::FAILURE);
     };
-    print!("{}", render(&status, redirect_active(&status)));
+    out!("{}", render(&status, redirect_active(&status)));
     Ok(ExitCode::SUCCESS)
 }
 
@@ -124,10 +124,10 @@ fn render(status: &Status, redirected: bool) -> String {
 pub fn stop(dirs: &Dirs, port: u16) -> anyhow::Result<ExitCode> {
     let pid = probe(port).map(|s| s.pid).or_else(|| running_pid(dirs));
     match pid {
-        None => println!("cyamus daemon is not running"),
+        None => outln!("cyamus daemon is not running"),
         Some(pid) => {
             terminate(pid).map_err(anyhow::Error::msg)?;
-            println!("stopped cyamus daemon (pid {pid})");
+            outln!("stopped cyamus daemon (pid {pid})");
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -239,9 +239,9 @@ pub fn install(dirs: &Dirs, port: u16, dry_run: bool) -> anyhow::Result<ExitCode
                 "cannot install the port-80 relay: {missing} not found; nothing was changed"
             );
         }
-        println!("note: {missing} not found; a real install would stop here");
+        outln!("note: {missing} not found; a real install would stop here");
     }
-    println!(
+    outln!(
         "Installing the port-80 relay to the cyamus daemon on port {port}{}",
         if dry_run {
             " (dry run: nothing is changed)"
@@ -273,7 +273,7 @@ pub fn install(dirs: &Dirs, port: u16, dry_run: bool) -> anyhow::Result<ExitCode
         // A daemon started here would run as root with root's state; leave
         // that to the user's next `workspace setup` or `daemon status`.
         if probe(port).is_none() {
-            println!(
+            outln!(
                 "Installed. The relay forwards to port {port}; URLs need no port once your daemon runs (`cyamus workspace setup` starts it)."
             );
             return Ok(ExitCode::SUCCESS);
@@ -286,7 +286,7 @@ pub fn install(dirs: &Dirs, port: u16, dry_run: bool) -> anyhow::Result<ExitCode
     let start = Instant::now();
     while start.elapsed() < READY_TIMEOUT {
         if probe(port).is_some_and(|s| redirect_active(&s)) {
-            println!(
+            outln!(
                 "Done: http://cyamus.localhost/ reaches the daemon. URLs no longer need :{port}."
             );
             return Ok(ExitCode::SUCCESS);
@@ -313,7 +313,7 @@ pub fn uninstall(port: u16, dry_run: bool) -> anyhow::Result<ExitCode> {
             nobody: 0,
         },
     );
-    println!(
+    outln!(
         "Removing the port-80 relay{}",
         if dry_run {
             " (dry run: nothing is changed)"
@@ -331,7 +331,7 @@ pub fn uninstall(port: u16, dry_run: bool) -> anyhow::Result<ExitCode> {
     })();
     removed.map_err(anyhow::Error::msg)?;
     if !dry_run {
-        println!("Done. URLs need :{port} again.");
+        outln!("Done. URLs need :{port} again.");
     }
     Ok(ExitCode::SUCCESS)
 }

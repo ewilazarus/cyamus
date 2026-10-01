@@ -1,3 +1,27 @@
+/// Writes to stdout; a closed pipe (`cyamus … | head`) ends the process
+/// quietly with 141 (128 + SIGPIPE) instead of panicking like `print!`.
+macro_rules! out {
+    ($($arg:tt)*) => {
+        $crate::stdout_write(format_args!($($arg)*))
+    };
+}
+
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        $crate::stdout_write(format_args!("{}\n", format_args!($($arg)*)))
+    };
+}
+
+pub(crate) fn stdout_write(args: std::fmt::Arguments<'_>) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    if let Err(e) = stdout.write_fmt(args).and_then(|()| stdout.flush())
+        && e.kind() == std::io::ErrorKind::BrokenPipe
+    {
+        std::process::exit(141);
+    }
+}
+
 mod cli;
 mod daemon;
 mod edit;

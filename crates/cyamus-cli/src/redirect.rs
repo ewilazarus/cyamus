@@ -249,7 +249,7 @@ impl Executor {
 
     pub fn run(&self, step: &Step) -> Result<(), String> {
         let line = self.command_line(&step.argv);
-        println!("  $ {}", line.join(" "));
+        outln!("  $ {}", line.join(" "));
         if self.dry_run {
             return Ok(());
         }
@@ -267,9 +267,9 @@ impl Executor {
     /// Places `content` at `dest` (root-owned, 644) via a staged temp file.
     pub fn place(&self, dest: &Path, content: &str, staging: &Path) -> Result<(), String> {
         if self.dry_run {
-            println!("  would write {}:", dest.display());
+            outln!("  would write {}:", dest.display());
             for line in content.lines() {
-                println!("    | {line}");
+                outln!("    | {line}");
             }
         }
         let parent = dest.parent().expect("absolute destination");
