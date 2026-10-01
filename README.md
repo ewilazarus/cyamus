@@ -14,6 +14,35 @@ Orca owns the UI and creates and deletes git worktrees. cyamus sets up each work
 ## Installation
 
 ```sh
+curl -fsSL https://github.com/ewilazarus/cyamus/releases/latest/download/install.sh | sh
+```
+
+The script downloads the prebuilt binary for your platform, checks its SHA-256, and installs it as `~/.local/bin/cyamus`. It never uses `sudo` and never edits your shell profile. If the install directory isn't on your `PATH`, it prints the line to add. Run it again to upgrade.
+
+| Variable | Effect |
+|---|---|
+| `CYAMUS_VERSION` | Install a specific release instead of the latest, e.g. `0.2.0` or `v0.2.0` |
+| `CYAMUS_INSTALL_DIR` | Install into this directory instead of `~/.local/bin` |
+
+```sh
+curl -fsSL https://github.com/ewilazarus/cyamus/releases/latest/download/install.sh | CYAMUS_VERSION=0.2.0 sh
+```
+
+To read the script before running it:
+
+```sh
+curl -fsSLO https://github.com/ewilazarus/cyamus/releases/latest/download/install.sh
+less install.sh
+sh install.sh
+```
+
+### From source
+
+On platforms without a prebuilt binary, install with cargo (Rust 1.89+):
+
+```sh
+cargo install --git https://github.com/ewilazarus/cyamus cyamus-cli
+# or, from a checkout:
 cargo install --path crates/cyamus-cli
 ```
 
@@ -162,3 +191,25 @@ fi
 ## Platform support
 
 Developed and verified on macOS. Linux is expected to work. Windows is not supported.
+
+Prebuilt binaries are published for:
+
+| Platform | Target |
+|---|---|
+| macOS, Apple Silicon | `aarch64-apple-darwin` |
+| Linux, x86_64 | `x86_64-unknown-linux-musl` (static) |
+| Linux, arm64 | `aarch64-unknown-linux-musl` (static) |
+
+Intel Macs are supported [from source](#from-source) only.
+
+## Releasing
+
+1. Bump `version` under `[workspace.package]` in `Cargo.toml` and commit.
+2. Tag the commit and push the tag:
+
+   ```sh
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+The [release workflow](.github/workflows/release.yml) checks that the tag matches the crate version and runs lint and tests. It then builds every target and publishes a GitHub Release with the archives, their `.sha256` files and `install.sh`. If any step fails, nothing is published.
