@@ -131,6 +131,17 @@ After a `cyamus compose down` that succeeded, cyamus SHALL disconnect the shared
 - **WHEN** a teardown hook runs `cyamus compose down`
 - **THEN** `cyamus-<project>-<branch-label>` no longer exists, and the shared containers keep running
 
+### Requirement: Leftover network cleanup
+Before attaching the shared containers, every `cyamus compose` and `cyamus compose-shared` invocation SHALL remove each network labelled `dev.cyamus.project=<project>` that belongs to no registered workspace of the project and has nothing but the shared stack's containers attached. It SHALL first disconnect the shared containers. The current worktree's own network SHALL never be removed this way. Failures SHALL be reported as warnings and SHALL NOT change the exit code.
+
+#### Scenario: Worktree deleted without teardown
+- **WHEN** a worktree was deleted without running teardown, and only the shared `db` is attached to its network `cyamus-<project>-<label>`
+- **THEN** the next `cyamus compose-shared` call removes that network
+
+#### Scenario: Network still in use
+- **WHEN** a network of an unregistered worktree still has a container from outside the shared stack attached
+- **THEN** it is kept
+
 ### Requirement: Shared containers rejoin worktree networks
 After every `cyamus compose-shared` invocation, and after `cyamus compose` brings the shared stack up, cyamus SHALL connect every running container of the shared stack to every existing network labelled `dev.cyamus.project=<project>` that it isn't already on, with its service name as an alias. Containers recreated by compose therefore stay reachable from running worktrees.
 

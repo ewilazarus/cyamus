@@ -366,3 +366,48 @@ fn old_compose_is_rejected() {
     let assert = f.cyamus(&f.wt, &["compose", "up"]).assert().failure();
     assert!(stderr(&assert).contains("Docker Compose 2.24.4 or later is required (found 2.20.2)"));
 }
+
+#[test]
+fn leftover_networks_are_cleaned_up() {
+    let f = Fake::new();
+    f.shared(&[("db", "")]);
+    fs::write(f.state.join("containers"), "c1 db\n").unwrap();
+    // Gone worktree, only the shared db attached: collected.
+    fs::write(f.state.join("net-cyamus-myproj-gone"), "c1full\n").unwrap();
+    // Something else still attached: kept.
+    fs::write(f.state.join("net-cyamus-myproj-busy"), "c1full zz9\n").unwrap();
+    // Registered workspace: kept even though idle.
+    fs::write(f.state.join("net-cyamus-myproj-kept"), "c1full\n").unwrap();
+    let records = f.env.state_home.join("cyamus/workspaces/myproj");
+    fs::create_dir_all(&records).unwrap();
+    fs::write(
+        records.join("kept.toml"),
+        format!(
+            "project = \"myproj\"\nbranch = \"kept\"\nlabel = \"kept\"\npath = \"{}\"\n",
+            f.wt.display()
+        ),
+    )
+    .unwrap();
+
+    f.cyamus(&f.wt, &["compose-shared", "ps"])
+        .assert()
+        .success();
+    let log = f.log();
+    assert!(log.contains("network rm cyamus-myproj-gone"), "{log}");
+    assert!(!log.contains("network rm cyamus-myproj-busy"), "{log}");
+    assert!(!log.contains("network rm cyamus-myproj-kept"), "{log}");
+}
+
+#[test]
+fn own_network_is_never_collected() {
+    let f = Fake::new();
+    f.shared(&[("db", "")]);
+    fs::write(f.state.join("containers"), "c1 db\n").unwrap();
+    fs::write(f.state.join("net-cyamus-myproj-feat-x"), "c1full\n").unwrap();
+    f.cyamus(&f.wt, &["compose", "up", "-d"]).assert().success();
+    assert!(
+        !f.log().contains("network rm cyamus-myproj-feat-x"),
+        "{}",
+        f.log()
+    );
+}

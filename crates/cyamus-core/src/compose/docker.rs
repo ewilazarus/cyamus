@@ -143,7 +143,7 @@ impl Docker {
     }
 
     /// Container IDs (full) attached to `network`.
-    fn attached(&self, network: &str) -> Result<Vec<String>, String> {
+    pub fn attached(&self, network: &str) -> Result<Vec<String>, String> {
         Ok(self
             .checked(&[
                 "network",

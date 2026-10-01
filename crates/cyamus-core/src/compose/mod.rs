@@ -19,7 +19,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cyamus_registry::label_from_slug;
+use cyamus_registry::{Registry, label_from_slug};
 
 use crate::daemon::DaemonControl;
 use crate::manifest::{Manifest, ManifestError};
@@ -141,12 +141,58 @@ pub fn shared(
         .args(args)
         .status()
         .map_err(|e| format!("cannot run docker: {e}"))?;
+    gc_networks(&docker, dirs, ctx.project(), None, reporter);
     if let Err(e) = reconcile(&docker, ctx.project()) {
         reporter.warning(&format!(
             "cannot attach shared services to worktree networks: {e}"
         ));
     }
     Ok(exit_code(status))
+}
+
+/// Removes worktree networks of `project` that no registered workspace owns
+/// and that hold nothing but shared containers: leftovers of a plain
+/// `docker compose down` or of a worktree deleted without teardown. A setup
+/// registers its workspace before its hooks run, so a network being brought
+/// up is never collected. Failures are warnings.
+fn gc_networks(
+    docker: &Docker,
+    dirs: &Dirs,
+    project: &str,
+    keep: Option<&str>,
+    reporter: &mut dyn Reporter,
+) {
+    let registry = Registry::new(dirs.registry_dir(), dirs.registry_lock());
+    let owned: BTreeSet<String> = registry
+        .read_all()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.project == project)
+        .map(|r| format!("cyamus-{project}-{}", r.label))
+        .collect();
+    let result = (|| -> Result<(), String> {
+        let shared: Vec<String> = docker
+            .project_containers(project)?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        for network in docker.labelled_networks(PROJECT_LABEL, project)? {
+            if owned.contains(&network) || keep == Some(network.as_str()) {
+                continue;
+            }
+            let only_shared = docker
+                .attached(&network)?
+                .iter()
+                .all(|id| shared.iter().any(|s| id.starts_with(s.as_str())));
+            if only_shared {
+                docker.remove_network(&network)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        reporter.warning(&format!("cannot clean up leftover networks: {e}"));
+    }
 }
 
 /// Connects every running shared container to every worktree network of
@@ -265,6 +311,7 @@ pub fn worktree(
                 }
             }
         }
+        gc_networks(shared, dirs, &project, Some(network), reporter);
         if subcommand != "down" {
             // Before the worktree's containers exist, so `db` resolves at boot.
             reconcile(shared, &project)?;
