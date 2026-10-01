@@ -374,6 +374,64 @@ commands = ["cyamus compose down", "drop_db"]
 
 The scripts expand `$CYAMUS_BRANCH_SNAKE` themselves, so each worktree's hooks create and drop that worktree's database. `cyamus compose-shared up -d --wait` makes sure Postgres is healthy before `create_db` runs.
 
+### Recipe: per-worktree environment with direnv
+
+Keep settings shared by every worktree in a linked `.env`, and let a setup hook write the per-worktree values (database name, service URLs) to `.env.local`. [direnv](https://direnv.net) loads both, with an `.envrc` that is the same in every worktree.
+
+The project config directory then holds:
+
+```
+<config>/
+├── cyamus.toml
+├── assets/
+│   ├── .env          ← your shared settings
+│   ├── envrc         ← below
+│   └── env.local     ← empty placeholder: touch assets/env.local
+└── bin/
+    └── write_env_local
+```
+
+Every asset source must exist, so create the empty placeholder with `touch assets/env.local`; setup fails on a missing source.
+
+```sh
+# assets/envrc
+dotenv
+dotenv_if_exists .env.local
+```
+
+```sh
+#!/bin/sh
+# bin/write_env_local
+cat > .env.local <<EOF
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/app_${CYAMUS_BRANCH_SNAKE}
+API_BASE_URL=http://api.${CYAMUS_DOMAIN}${CYAMUS_URL_SUFFIX}
+MAILPIT_URL=http://mailpit.${CYAMUS_PROJECT}.localhost${CYAMUS_URL_SUFFIX}
+EOF
+direnv allow .
+```
+
+```toml
+[[link]]
+source = ".env"
+target = ".env"
+
+[[link]]
+source = "envrc"
+target = ".envrc"
+
+[[copy]]                     # the empty placeholder: keeps .env.local out of git status
+source = "env.local"
+target = ".env.local"
+
+[[hooks.on_setup]]
+commands = ["write_env_local"]
+```
+
+- **Order:** assets are applied before hooks, so copying the empty `env.local` makes cyamus exclude `.env.local` from `git status`, and the hook then writes the real content. Every setup resets it to empty and rewrites it, so it is always current.
+- **Approval:** direnv asks for approval per directory, so the hook runs `direnv allow .` for each new worktree.
+- **Your Mac, not containers:** these values are for tools that run on your machine. To reach the shared Postgres from there, publish it on a fixed host port in `<config>/compose.yaml` (`ports: ["5433:5432"]`; one per project, so it only has to be unique across projects). Containers keep using `db:5432`.
+- **When values change:** they are written at setup. If you install or remove the [port-80 relay](#urls-without-a-port) later, re-run `cyamus workspace setup` to refresh `CYAMUS_URL_SUFFIX`.
+
 ## Platform support
 
 Developed and verified on macOS. Linux is expected to work. Windows is not supported.
