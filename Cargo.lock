@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "cyamus-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "cyamus-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cyamus-registry",
  "globset",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "cyamus-daemon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bollard",
  "bytes",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "cyamus-registry"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "tempfile",
