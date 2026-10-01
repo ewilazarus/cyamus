@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jetify-com/devbox-install-action@v0.15.0
+        with:
+          enable-cache: true
+      - name: Lint
+        run: devbox run lint
+      - name: Test
+        run: devbox run test

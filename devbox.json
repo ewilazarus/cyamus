@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.5/.schema/devbox.schema.json",
+  "packages": [
+    "rustc@1.97.1",
+    "cargo@1.97.1",
+    "clippy@1.97.1",
+    "rustfmt@1.97.1",
+    "rust-analyzer@latest"
+  ],
+  "shell": {
+    "scripts": {
+      "build": "cargo build",
+      "test": "cargo test --workspace",
+      "lint": [
+        "cargo fmt --all --check",
+        "cargo clippy --workspace --all-targets -- -D warnings"
+      ],
+      "check": [
+        "cargo fmt --all --check",
+        "cargo clippy --workspace --all-targets -- -D warnings",
+        "cargo test --workspace"
+      ]
+    }
+  }
+}
