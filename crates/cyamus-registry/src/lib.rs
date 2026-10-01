@@ -17,6 +17,9 @@ pub const MAX_LABEL_LEN: usize = 63;
 
 const RECORD_EXT: &str = "toml";
 
+/// Counter bumped (under the lock) by every change; see [`Registry::change_key`].
+const GENERATION_FILE: &str = ".generation";
+
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
     #[error("registry I/O failed at {path}")]
@@ -99,6 +102,7 @@ impl Registry {
             });
         }
         write_atomic(&file, &record)?;
+        self.bump()?;
         Ok(Registration::Registered)
     }
 
@@ -116,6 +120,7 @@ impl Registry {
         let removed = match read_record(&file) {
             Some(existing) if existing.path == path => {
                 remove_file(&file)?;
+                self.bump()?;
                 true
             }
             _ => false,
@@ -145,6 +150,9 @@ impl Registry {
             // Only succeeds when empty, which is exactly what we want.
             let _ = fs::remove_dir(&project_dir);
         }
+        if !removed.is_empty() {
+            self.bump()?;
+        }
         Ok(removed)
     }
 
@@ -164,11 +172,13 @@ impl Registry {
     }
 
     /// A cheap value that changes whenever a record is added, replaced or
-    /// removed: every record file's name and inode. Writes always rename a
-    /// fresh file into place, so a replaced record has a new inode even when
-    /// it lands within the same mtime tick.
+    /// removed: a generation counter every write bumps under the lock, plus
+    /// every record file's name and inode. The counter is what makes it
+    /// reliable: a filesystem may hand a replaced record the inode its
+    /// predecessor just freed (ext4 does), leaving names and inodes equal.
     pub fn change_key(&self) -> ChangeKey {
         use std::os::unix::fs::MetadataExt;
+        let generation = read_generation(&self.dir);
         let mut entries = Vec::new();
         for dir in subdirs(&self.dir).unwrap_or_default() {
             for file in record_files(&dir).unwrap_or_default() {
@@ -176,7 +186,23 @@ impl Registry {
                 entries.push((file.into_os_string(), ino));
             }
         }
-        ChangeKey(entries)
+        ChangeKey(generation, entries)
+    }
+
+    /// Increments the generation counter. Callers hold the lock.
+    fn bump(&self) -> Result<(), RegistryError> {
+        fs::create_dir_all(&self.dir).map_err(io_at(&self.dir))?;
+        let next = read_generation(&self.dir).wrapping_add(1);
+        let path = self.dir.join(GENERATION_FILE);
+        let tmp = self
+            .dir
+            .join(format!("{GENERATION_FILE}.{}.tmp", std::process::id()));
+        fs::write(&tmp, format!("{next}\n"))
+            .and_then(|()| fs::rename(&tmp, &path))
+            .map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                io_at(&path)(e)
+            })
     }
 
     fn lock(&self) -> Result<File, RegistryError> {
@@ -197,7 +223,14 @@ impl Registry {
 
 /// See [`Registry::change_key`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChangeKey(Vec<(OsString, u64)>);
+pub struct ChangeKey(u64, Vec<(OsString, u64)>);
+
+fn read_generation(dir: &Path) -> u64 {
+    fs::read_to_string(dir.join(GENERATION_FILE))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
 
 fn io_at(path: &Path) -> impl FnOnce(io::Error) -> RegistryError + '_ {
     move |source| RegistryError::Io {
